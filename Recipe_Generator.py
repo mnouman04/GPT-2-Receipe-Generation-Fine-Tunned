@@ -1,18 +1,19 @@
 """
-🍳 AI Recipe Generator - Streamlit App
-A modern, optimized app for generating creative recipes using fine-tuned GPT-2
+🍳 AI Recipe Generator - Streamlit App (Google Drive Model)
+Loads fine-tuned GPT-2 models directly from Google Drive.
 """
 
 import streamlit as st
 import torch
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 import time
-from typing import List, Dict
 import os
+from typing import List, Dict
+import gdown  # For downloading from Google Drive
 
-# ============================================================================
+# ============================================================================ 
 # PAGE CONFIGURATION
-# ============================================================================
+# ============================================================================ 
 st.set_page_config(
     page_title="🍳 AI Recipe Generator",
     page_icon="🍳",
@@ -20,9 +21,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ============================================================================
+# ============================================================================ 
 # CUSTOM CSS FOR MODERN UI
-# ============================================================================
+# ============================================================================ 
 st.markdown("""
 <style>
     /* Main theme colors */
@@ -221,90 +222,134 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================================================
-# MODEL LOADING FUNCTIONS (⚠️ MODELS LOADED HERE ⚠️)
-# ============================================================================
+
+# ============================================================================ 
+# GOOGLE DRIVE FILE LINKS
+# ============================================================================ 
+
+# IMPORTANT: Extract the FILE_ID from your Google Drive links
+# Format for files: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+# You need only the FILE_ID part
+
+# For a folder, you need to:
+# 1. Zip the folder first
+# 2. Upload the zip file to Google Drive
+# 3. Share it and get the file ID
+
+# Example:
+# Original link: https://drive.google.com/file/d/1hi_3aAcyzyNsmtbaTlC56bWBxId0dh3l/view?usp=sharing
+# File ID: 1hi_3aAcyzyNsmtbaTlC56bWBxId0dh3l
+
+GDRIVE_MODEL_FOLDER_ID = None  # Set to None if using state dict
+GDRIVE_STATE_DICT_ID = "1hi_3aAcyzyNsmtbaTlC56bWBxId0dh3l"  # Extracted FILE_ID only
+
+LOCAL_MODEL_DIR = "./recipe_gpt2_model"
+LOCAL_STATE_DICT = "./RecipeGenerationGPT2.pt"
+
+def download_from_gdrive(file_id: str, output: str):
+    """Download file from Google Drive if not exists."""
+    if not os.path.exists(output):
+        try:
+            # Use gdown with proper file ID format
+            url = f"https://drive.google.com/uc?id={file_id}"
+            gdown.download(url, output, quiet=False, fuzzy=True)
+        except Exception as e:
+            st.error(f"Failed to download file: {str(e)}")
+            st.info("Make sure the file is shared with 'Anyone with the link' can view")
+            raise
+
+# ============================================================================ 
+# MODEL LOADING FUNCTION
+# ============================================================================ 
 
 @st.cache_resource(show_spinner=False)
 def load_model_and_tokenizer():
     """
-    ⚠️ CRITICAL: MODEL AND TOKENIZER LOADING HAPPENS HERE ⚠️
-    
-    This function loads:
-    1. GPT-2 Tokenizer from './recipe_gpt2_model' directory
-    2. Fine-tuned GPT-2 Model from './recipe_gpt2_model' directory
-    
-    Expected directory structure:
-    - root/
-      ├── app.py (this file)
-      ├── recipe_gpt2_model/
-      │   ├── config.json
-      │   ├── pytorch_model.bin
-      │   ├── tokenizer_config.json
-      │   ├── vocab.json
-      │   └── merges.txt
-    
-    Alternative: Load from state dict if you saved with torch.save()
-    - root/
-      ├── app.py (this file)
-      └── RecipeGenerationGPT2.pt
+    Load fine-tuned GPT-2 from Google Drive.
     """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     try:
-        # Determine device
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-        # Method 1: Load from saved pretrained directory (RECOMMENDED)
-        if os.path.exists('./recipe_gpt2_model'):
-            tokenizer = GPT2Tokenizer.from_pretrained('./recipe_gpt2_model')
-            model = GPT2LMHeadModel.from_pretrained('./recipe_gpt2_model')
+        # Method 1: Load from saved pretrained directory (if you have the folder)
+        if os.path.exists(LOCAL_MODEL_DIR) and os.path.exists(os.path.join(LOCAL_MODEL_DIR, "config.json")):
+            st.info("📁 Loading model from local directory...")
+            tokenizer = GPT2Tokenizer.from_pretrained(LOCAL_MODEL_DIR)
+            model = GPT2LMHeadModel.from_pretrained(LOCAL_MODEL_DIR)
             model.to(device)
             model.eval()
-            return model, tokenizer, device, "pretrained_dir"
+            return model, tokenizer, device, "pretrained_dir_local"
         
-        # Method 2: Load from state dict file
-        elif os.path.exists('./RecipeGenerationGPT2.pt'):
-            tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+        # Method 2: Load from state dict file (download from Drive if needed)
+        elif GDRIVE_STATE_DICT_ID:
+            st.info("☁️ Downloading model from Google Drive...")
+            download_from_gdrive(GDRIVE_STATE_DICT_ID, LOCAL_STATE_DICT)
+            
+            st.info("🔄 Loading model weights...")
+            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
             tokenizer.pad_token = tokenizer.eos_token
             
-            model = GPT2LMHeadModel.from_pretrained('gpt2')
-            state_dict = torch.load('./RecipeGenerationGPT2.pt', map_location=device)
+            model = GPT2LMHeadModel.from_pretrained("gpt2")
+            state_dict = torch.load(LOCAL_STATE_DICT, map_location=device)
             model.load_state_dict(state_dict)
             model.to(device)
             model.eval()
-            return model, tokenizer, device, "state_dict"
+            
+            st.success("✅ Model loaded successfully!")
+            return model, tokenizer, device, "state_dict_drive"
         
-        # Method 3: Load from checkpoint
-        elif os.path.exists('./model_checkpoints/best_model.pt'):
-            tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+        # Method 3: Load from local checkpoint
+        elif os.path.exists(LOCAL_STATE_DICT):
+            st.info("💾 Loading model from local checkpoint...")
+            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
             tokenizer.pad_token = tokenizer.eos_token
             
-            model = GPT2LMHeadModel.from_pretrained('gpt2')
+            model = GPT2LMHeadModel.from_pretrained("gpt2")
+            state_dict = torch.load(LOCAL_STATE_DICT, map_location=device)
+            model.load_state_dict(state_dict)
+            model.to(device)
+            model.eval()
+            return model, tokenizer, device, "state_dict_local"
+        
+        # Method 4: Load from model_checkpoints folder
+        elif os.path.exists('./model_checkpoints/best_model.pt'):
+            st.info("📦 Loading model from checkpoint folder...")
+            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+            tokenizer.pad_token = tokenizer.eos_token
+            
+            model = GPT2LMHeadModel.from_pretrained("gpt2")
             state_dict = torch.load('./model_checkpoints/best_model.pt', map_location=device)
             model.load_state_dict(state_dict)
             model.to(device)
             model.eval()
             return model, tokenizer, device, "checkpoint"
-        
-        # Fallback: Load base GPT-2 (not fine-tuned)
+
+        # Fallback: Load base GPT-2
         else:
-            st.warning("⚠️ Fine-tuned model not found. Loading base GPT-2. Results may not be optimal.")
-            tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+            st.warning("⚠️ Fine-tuned model not found. Loading base GPT-2.")
+            st.info("For better results, upload your model file or configure Google Drive access.")
+            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
             tokenizer.pad_token = tokenizer.eos_token
-            model = GPT2LMHeadModel.from_pretrained('gpt2')
+            model = GPT2LMHeadModel.from_pretrained("gpt2")
             model.to(device)
             model.eval()
             return model, tokenizer, device, "base_gpt2"
-            
+        
     except Exception as e:
         st.error(f"❌ Error loading model: {str(e)}")
-        st.info("Please ensure the model files are in the correct location.")
+        st.info("""
+        **Troubleshooting Steps:**
+        1. Make sure your Google Drive file is shared with "Anyone with the link"
+        2. Extract only the FILE_ID from your sharing link
+        3. Or place your model files in the local directory:
+           - `./RecipeGenerationGPT2.pt` for state dict
+           - `./recipe_gpt2_model/` folder for full model
+           - `./model_checkpoints/best_model.pt` for checkpoint
+        """)
         st.stop()
 
-# ============================================================================
+# ============================================================================ 
 # RECIPE GENERATION FUNCTION
-# ============================================================================
-
+# ============================================================================ 
 def generate_recipe(
     model, 
     tokenizer, 
@@ -395,10 +440,9 @@ def generate_recipe(
             'full_text': generated_text
         }
 
-# ============================================================================
-# POPULAR INGREDIENTS DATABASE
-# ============================================================================
-
+# ============================================================================ 
+# POPULAR INGREDIENTS & RECIPE EXAMPLES
+# ============================================================================ 
 POPULAR_INGREDIENTS = {
     "🍖 Proteins": ["chicken breast", "ground beef", "salmon", "tofu", "eggs", "shrimp", "turkey", "pork chops"],
     "🥬 Vegetables": ["bell peppers", "onion", "garlic", "tomatoes", "spinach", "broccoli", "carrots", "mushrooms"],
@@ -427,10 +471,9 @@ RECIPE_EXAMPLES = [
     }
 ]
 
-# ============================================================================
+# ============================================================================ 
 # INITIALIZE SESSION STATE
-# ============================================================================
-
+# ============================================================================ 
 if 'generated_recipes' not in st.session_state:
     st.session_state.generated_recipes = []
 
@@ -440,17 +483,15 @@ if 'ingredient_list' not in st.session_state:
 if 'generation_count' not in st.session_state:
     st.session_state.generation_count = 0
 
-# ============================================================================
-# LOAD MODEL (⚠️ MODEL LOADING TRIGGERED HERE ⚠️)
-# ============================================================================
-
+# ============================================================================ 
+# LOAD MODEL
+# ============================================================================ 
 with st.spinner("🔥 Heating up the AI kitchen..."):
     model, tokenizer, device, load_method = load_model_and_tokenizer()
 
-# ============================================================================
+# ============================================================================ 
 # MAIN APP LAYOUT
-# ============================================================================
-
+# ============================================================================ 
 # Header
 st.markdown("""
 <div class="main-header">
