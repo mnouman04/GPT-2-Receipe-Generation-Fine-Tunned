@@ -205,3 +205,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+venv
+my.md
+recipe_gpt2_model
+model_checkpoints
+RecipeGenerationGPT2.pt
