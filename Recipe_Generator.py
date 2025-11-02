@@ -227,12 +227,35 @@ st.markdown("""
 # GOOGLE DRIVE FILE LINKS
 # ============================================================================ 
 
-
 GDRIVE_MODEL_FOLDER_ID = "1ZH6DoO0fGZ9kRyftCM73VVPOG0xiubnI"  # Set to None if using state dict
 GDRIVE_STATE_DICT_ID = "1hi_3aAcyzyNsmtbaTlC56bWBxId0dh3l"  # Extracted FILE_ID only
 
 LOCAL_MODEL_DIR = "./recipe_gpt2_model"
 LOCAL_STATE_DICT = "./RecipeGenerationGPT2.pt"
+
+def verify_gdrive_access(file_id: str) -> bool:
+    """
+    Verify if Google Drive file is accessible without downloading.
+    
+    Args:
+        file_id: Google Drive file ID
+    
+    Returns:
+        bool: True if accessible, False otherwise
+    """
+    try:
+        import requests
+        url = f"https://drive.google.com/uc?id={file_id}&export=download"
+        response = requests.head(url, allow_redirects=True, timeout=10)
+        
+        # Check if request was successful
+        if response.status_code == 200:
+            return True
+        else:
+            return False
+    except Exception as e:
+        st.warning(f"⚠️ Could not verify Google Drive access: {str(e)}")
+        return False
 
 def download_from_gdrive(file_id: str, output: str):
     """Download file from Google Drive if not exists."""
@@ -240,11 +263,65 @@ def download_from_gdrive(file_id: str, output: str):
         try:
             # Use gdown with proper file ID format
             url = f"https://drive.google.com/uc?id={file_id}"
+            st.info(f"📥 Downloading from Google Drive (ID: {file_id[:10]}...)")
             gdown.download(url, output, quiet=False, fuzzy=True)
+            st.success(f"✅ Downloaded successfully to {output}")
         except Exception as e:
-            st.error(f"Failed to download file: {str(e)}")
+            st.error(f"❌ Failed to download file: {str(e)}")
             st.info("Make sure the file is shared with 'Anyone with the link' can view")
             raise
+
+# ============================================================================ 
+# GOOGLE DRIVE CONFIGURATION CHECK
+# ============================================================================ 
+
+def check_gdrive_configuration():
+    """
+    Check and display Google Drive configuration status.
+    This runs at app startup to verify links are valid.
+    """
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🔗 Google Drive Status")
+    
+    # Check if IDs are configured
+    folder_configured = GDRIVE_MODEL_FOLDER_ID and GDRIVE_MODEL_FOLDER_ID != "None"
+    state_dict_configured = GDRIVE_STATE_DICT_ID and GDRIVE_STATE_DICT_ID != "None"
+    
+    if folder_configured:
+        st.sidebar.markdown(f"**Model Folder ID:** `{GDRIVE_MODEL_FOLDER_ID[:15]}...`")
+        if verify_gdrive_access(GDRIVE_MODEL_FOLDER_ID):
+            st.sidebar.success("✅ Folder link accessible")
+        else:
+            st.sidebar.error("❌ Folder link not accessible")
+    else:
+        st.sidebar.info("ℹ️ Model folder ID not configured")
+    
+    if state_dict_configured:
+        st.sidebar.markdown(f"**State Dict ID:** `{GDRIVE_STATE_DICT_ID[:15]}...`")
+        if verify_gdrive_access(GDRIVE_STATE_DICT_ID):
+            st.sidebar.success("✅ State dict link accessible")
+        else:
+            st.sidebar.error("❌ State dict link not accessible")
+    else:
+        st.sidebar.info("ℹ️ State dict ID not configured")
+    
+    # Check local files
+    st.sidebar.markdown("### 📁 Local Files Status")
+    
+    if os.path.exists(LOCAL_MODEL_DIR):
+        st.sidebar.success(f"✅ Model dir exists: `{LOCAL_MODEL_DIR}`")
+    else:
+        st.sidebar.warning(f"⚠️ Model dir not found: `{LOCAL_MODEL_DIR}`")
+    
+    if os.path.exists(LOCAL_STATE_DICT):
+        st.sidebar.success(f"✅ State dict exists: `{LOCAL_STATE_DICT}`")
+    else:
+        st.sidebar.warning(f"⚠️ State dict not found: `{LOCAL_STATE_DICT}`")
+    
+    if os.path.exists('./model_checkpoints/best_model.pt'):
+        st.sidebar.success("✅ Checkpoint exists")
+    else:
+        st.sidebar.warning("⚠️ Checkpoint not found")
 
 # ============================================================================ 
 # MODEL LOADING FUNCTION
@@ -253,40 +330,50 @@ def download_from_gdrive(file_id: str, output: str):
 @st.cache_resource(show_spinner=False)
 def load_model_and_tokenizer():
     """
-    Load fine-tuned GPT-2 from Google Drive.
+    Load fine-tuned GPT-2 from Google Drive or local files.
+    Priority: Local files → Google Drive → Base GPT-2
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     try:
-        # Method 1: Load from saved pretrained directory (if you have the folder)
+        # Method 1: Load from saved pretrained directory (HIGHEST PRIORITY)
         if os.path.exists(LOCAL_MODEL_DIR) and os.path.exists(os.path.join(LOCAL_MODEL_DIR, "config.json")):
             st.info("📁 Loading model from local directory...")
             tokenizer = GPT2Tokenizer.from_pretrained(LOCAL_MODEL_DIR)
             model = GPT2LMHeadModel.from_pretrained(LOCAL_MODEL_DIR)
             model.to(device)
             model.eval()
+            st.success("✅ Model loaded from local directory!")
             return model, tokenizer, device, "pretrained_dir_local"
         
         # Method 2: Load from state dict file (download from Drive if needed)
-        elif GDRIVE_STATE_DICT_ID:
-            st.info("☁️ Downloading model from Google Drive...")
-            download_from_gdrive(GDRIVE_STATE_DICT_ID, LOCAL_STATE_DICT)
+        elif GDRIVE_STATE_DICT_ID and GDRIVE_STATE_DICT_ID != "None":
+            st.info("☁️ Local model not found. Attempting Google Drive download...")
+            st.info(f"📥 Using State Dict ID: {GDRIVE_STATE_DICT_ID[:20]}...")
             
-            st.info("🔄 Loading model weights...")
-            tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-            tokenizer.pad_token = tokenizer.eos_token
-            
-            model = GPT2LMHeadModel.from_pretrained("gpt2")
-            state_dict = torch.load(LOCAL_STATE_DICT, map_location=device)
-            model.load_state_dict(state_dict)
-            model.to(device)
-            model.eval()
-            
-            st.success("✅ Model loaded successfully!")
-            return model, tokenizer, device, "state_dict_drive"
+            # Verify access before attempting download
+            if verify_gdrive_access(GDRIVE_STATE_DICT_ID):
+                st.success("✅ Google Drive link verified!")
+                download_from_gdrive(GDRIVE_STATE_DICT_ID, LOCAL_STATE_DICT)
+                
+                st.info("🔄 Loading model weights...")
+                tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+                tokenizer.pad_token = tokenizer.eos_token
+                
+                model = GPT2LMHeadModel.from_pretrained("gpt2")
+                state_dict = torch.load(LOCAL_STATE_DICT, map_location=device)
+                model.load_state_dict(state_dict)
+                model.to(device)
+                model.eval()
+                
+                st.success("✅ Model loaded from Google Drive successfully!")
+                return model, tokenizer, device, "state_dict_drive"
+            else:
+                st.error("❌ Google Drive link verification failed!")
+                st.info("Falling back to local files or base model...")
         
         # Method 3: Load from local checkpoint
-        elif os.path.exists(LOCAL_STATE_DICT):
+        if os.path.exists(LOCAL_STATE_DICT):
             st.info("💾 Loading model from local checkpoint...")
             tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
             tokenizer.pad_token = tokenizer.eos_token
@@ -296,6 +383,7 @@ def load_model_and_tokenizer():
             model.load_state_dict(state_dict)
             model.to(device)
             model.eval()
+            st.success("✅ Model loaded from local checkpoint!")
             return model, tokenizer, device, "state_dict_local"
         
         # Method 4: Load from model_checkpoints folder
@@ -309,12 +397,17 @@ def load_model_and_tokenizer():
             model.load_state_dict(state_dict)
             model.to(device)
             model.eval()
+            st.success("✅ Model loaded from checkpoint!")
             return model, tokenizer, device, "checkpoint"
 
         # Fallback: Load base GPT-2
         else:
             st.warning("⚠️ Fine-tuned model not found. Loading base GPT-2.")
-            st.info("For better results, upload your model file or configure Google Drive access.")
+            st.info("""
+            **For better results:**
+            1. Place model files in local directory, OR
+            2. Configure valid Google Drive links
+            """)
             tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
             tokenizer.pad_token = tokenizer.eos_token
             model = GPT2LMHeadModel.from_pretrained("gpt2")
@@ -327,11 +420,9 @@ def load_model_and_tokenizer():
         st.info("""
         **Troubleshooting Steps:**
         1. Make sure your Google Drive file is shared with "Anyone with the link"
-        2. Extract only the FILE_ID from your sharing link
-        3. Or place your model files in the local directory:
-           - `./RecipeGenerationGPT2.pt` for state dict
-           - `./recipe_gpt2_model/` folder for full model
-           - `./model_checkpoints/best_model.pt` for checkpoint
+        2. Verify the FILE_ID is correct (not a folder link or view link)
+        3. Check that local model files exist in the correct location
+        4. Try running the verification check in the sidebar
         """)
         st.stop()
 
@@ -477,6 +568,9 @@ if 'generation_count' not in st.session_state:
 with st.spinner("🔥 Heating up the AI kitchen..."):
     model, tokenizer, device, load_method = load_model_and_tokenizer()
 
+# Run Google Drive configuration check
+check_gdrive_configuration()
+
 # ============================================================================ 
 # MAIN APP LAYOUT
 # ============================================================================ 
@@ -518,7 +612,20 @@ with st.sidebar:
     st.info(f"{device_icon} Device: **{device.type.upper()}**")
     
     load_icon = "✅" if load_method != "base_gpt2" else "⚠️"
-    st.info(f"{load_icon} Model: **{load_method.replace('_', ' ').title()}**")
+    model_display = load_method.replace('_', ' ').title()
+    st.info(f"{load_icon} Model: **{model_display}**")
+    
+    # Display which source was used
+    if load_method == "pretrained_dir_local":
+        st.success("📁 Loaded from: Local Directory")
+    elif load_method == "state_dict_drive":
+        st.success("☁️ Loaded from: Google Drive")
+    elif load_method in ["state_dict_local", "checkpoint"]:
+        st.success("💾 Loaded from: Local Checkpoint")
+    else:
+        st.warning("⚠️ Using: Base GPT-2 (Not Fine-tuned)")
+    
+    # Google Drive configuration status is shown by check_gdrive_configuration() above
     
     st.markdown("---")
     
