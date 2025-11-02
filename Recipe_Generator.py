@@ -5,7 +5,7 @@ Loads fine-tuned GPT-2 models directly from Google Drive.
 
 import streamlit as st
 import torch
-from transformers import GPT2Tokenizer, GPT2LMHeadModel
+from transformers.models.gpt2 import GPT2Tokenizer, GPT2LMHeadModel
 import time
 import os
 from typing import List, Dict
