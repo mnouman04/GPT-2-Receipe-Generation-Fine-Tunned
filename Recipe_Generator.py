@@ -227,20 +227,8 @@ st.markdown("""
 # GOOGLE DRIVE FILE LINKS
 # ============================================================================ 
 
-# IMPORTANT: Extract the FILE_ID from your Google Drive links
-# Format for files: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
-# You need only the FILE_ID part
 
-# For a folder, you need to:
-# 1. Zip the folder first
-# 2. Upload the zip file to Google Drive
-# 3. Share it and get the file ID
-
-# Example:
-# Original link: https://drive.google.com/file/d/1hi_3aAcyzyNsmtbaTlC56bWBxId0dh3l/view?usp=sharing
-# File ID: 1hi_3aAcyzyNsmtbaTlC56bWBxId0dh3l
-
-GDRIVE_MODEL_FOLDER_ID = None  # Set to None if using state dict
+GDRIVE_MODEL_FOLDER_ID = "1ZH6DoO0fGZ9kRyftCM73VVPOG0xiubnI"  # Set to None if using state dict
 GDRIVE_STATE_DICT_ID = "1hi_3aAcyzyNsmtbaTlC56bWBxId0dh3l"  # Extracted FILE_ID only
 
 LOCAL_MODEL_DIR = "./recipe_gpt2_model"
